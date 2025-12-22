@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  rpc-service:
+    build: ./rpc_service
+    container_name: agendamento_rpc
+    ports:
+      - "8000:8000"
+    networks:
+      - minharede
+      
+  rest-interface:
+    build: ./rest_interface
+    container_name: agendamento_rest
+    ports:
+      - "5000:5000"
+    environment:
+      - RPC_HOST=rpc-service
+    depends_on:
+      - rpc-service
+    networks:
+      - minharede
+
+networks:
+  minharede:
+    driver: bridge
