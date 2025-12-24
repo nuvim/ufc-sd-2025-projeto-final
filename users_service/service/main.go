@@ -12,7 +12,7 @@ import (
 	_ "github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc"
-	pb "github.com/yourteam/users-service/proto"
+	pb "github.com/nuvim/ufc-sd-2025-projeto-final/tree/main/users_service"
 )
 
 type server struct {
