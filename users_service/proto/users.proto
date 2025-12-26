@@ -2,55 +2,33 @@ syntax = "proto3";
 
 package users;
 
-option go_package = "github.com/nuvim/ufc-sd-2025-projeto-final/tree/main/users_service";
+option go_package = "./pb";
 
-// 1. Definindo os ENUMs para garantir integridade igual ao SQL
+// Tipos de Usuário (Igual ao Banco)
 enum UserType {
-  UNKNOWN_ROLE = 0; // Protobuf exige um valor 0 padrão
+  UNKNOWN_ROLE = 0;
   ADMINISTRADOR = 1;
   MEDICO = 2;
   RECEPCIONISTA = 3;
   PACIENTE = 4;
 }
 
-enum SpecialtyType {
-  NO_SPECIALTY = 0; // Para pacientes e admins
-  CARDIOLOGIA = 1;
-  PEDIATRIA = 2;
-  ORTOPEDIA = 3;
-  DERMATOLOGIA = 4;
-}
-
-// UserService gerencia o ciclo de vida dos usuários (Médicos, Pacientes, etc.)
 service UserService {
-  // CreateUser registra um novo usuário no sistema
   rpc CreateUser(CreateUserRequest) returns (UserResponse);
-
-  // GetUser busca os dados de um usuário pelo ID
   rpc GetUser(GetUserRequest) returns (UserResponse);
-
-  // UpdateUser atualiza dados permitidos do perfil
   rpc UpdateUser(UpdateUserRequest) returns (UserResponse);
-
-  // DeleteUser remove um usuário (respeitando as regras de integridade)
   rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
-  
-  // ListUsers retorna uma lista paginada de usuários
-  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
-  
-  // AuthenticateUser verifica email/senha e retorna token
   rpc AuthenticateUser(AuthRequest) returns (AuthResponse);
+  
+  // Adicionado: Agora as mensagens para isso existem lá embaixo
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
 }
 
 message CreateUserRequest {
   string name = 1;
-  string password = 2;
-  UserType user_type = 3; // Agora usa o Enum
-  string email = 4;
-  string cpf = 5;
-  string phone = 6;
-  string crm = 7; // Novo: Apenas para médicos
-  SpecialtyType specialty = 8; // Novo: Apenas para médicos
+  string email = 2;
+  string password = 3;
+  UserType user_type = 4;
 }
 
 message GetUserRequest {
@@ -61,24 +39,10 @@ message UpdateUserRequest {
   int32 user_id = 1;
   string name = 2;
   string email = 3;
-  string phone = 4;
-  // Removi user_type (geralmente não se muda o papel de alguém depois de criado)
-  string crm = 5;
-  SpecialtyType specialty = 6;
 }
 
 message DeleteUserRequest {
   int32 user_id = 1;
-}
-
-message DeleteUserResponse {
-    bool success = 1; // Opcional, pois erro gRPC já trata falhas
-}
-
-message ListUsersRequest {
-  UserType user_type = 1; // Filtrar por tipo (ex: listar só médicos)
-  int32 limit = 2;
-  int32 offset = 3;
 }
 
 message AuthRequest {
@@ -91,16 +55,11 @@ message UserResponse {
   string name = 2;
   string email = 3;
   UserType user_type = 4;
-  string cpf = 5;
-  string phone = 6;
-  string created_at = 7;
-  string crm = 8;        // Pode vir vazio se não for médico
-  string specialty = 9;  // Retorna a string da especialidade
 }
 
-message ListUsersResponse {
-  repeated UserResponse users = 1;
-  int32 total = 2;
+message DeleteUserResponse {
+  bool success = 1;
+  string message = 2;
 }
 
 message AuthResponse {
@@ -108,14 +67,17 @@ message AuthResponse {
   string token = 2;
   int32 user_id = 3;
   UserType user_type = 4;
+  string message = 5; // ADICIONADO: O campo que faltava para o login
 }
 
-// Mensagens auxiliares para o Serviço de Agendamento
-message ValidateDoctorRequest {
-    int32 doctor_id = 1;
+// ADICIONADO: As mensagens que faltavam para listar usuários
+message ListUsersRequest {
+  UserType user_type = 1; // Filtro opcional
+  int32 limit = 2;
+  int32 offset = 3;
 }
 
-message ValidateDoctorResponse {
-    bool is_valid = 1;
-    string specialty = 2;
+message ListUsersResponse {
+  repeated UserResponse users = 1;
+  int32 total = 2;
 }
