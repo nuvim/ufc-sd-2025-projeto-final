@@ -1,209 +1,142 @@
 from flask import Flask, request, jsonify
 import grpc
-import os
 import sys
+import os
 
-# Importar os arquivos gerados do proto
+# Adiciona o diretório atual ao path para importar os stubs
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 import users_pb2
 import users_pb2_grpc
 
 app = Flask(__name__)
 
-# Configuração do cliente gRPC
-GRPC_HOST = os.getenv('GRPC_HOST', 'localhost')
-GRPC_PORT = os.getenv('GRPC_PORT', '50051')
+# Configuração do canal gRPC (Conecta no Go)
+# Se rodar via Docker, mude 'localhost' para o nome do serviço no compose
+GRPC_SERVER = 'localhost:50051' 
 
 def get_grpc_stub():
-    channel = grpc.insecure_channel(f'{GRPC_HOST}:{GRPC_PORT}')
+    channel = grpc.insecure_channel(GRPC_SERVER)
     return users_pb2_grpc.UserServiceStub(channel)
 
-@app.route('/health', methods=['GET'])
-def health():
-    return jsonify({'status': 'healthy'}), 200
+# --- Mapeamento de Strings para ENUMs ---
+def string_to_role(role_str):
+    roles = {
+        "admin": users_pb2.ADMINISTRADOR,
+        "doctor": users_pb2.MEDICO,
+        "receptionist": users_pb2.RECEPCIONISTA,
+        "patient": users_pb2.PACIENTE
+    }
+    return roles.get(role_str.lower(), users_pb2.PACIENTE) # Default: Paciente
+
+def role_to_string(role_enum):
+    # O Protobuf retorna o nome do enum (ex: MEDIC) se converter para string
+    # Mas aqui simplificamos retornando o valor inteiro ou mapeando de volta se quiser
+    return str(role_enum)
+
+# --- Rotas REST ---
 
 @app.route('/users', methods=['POST'])
 def create_user():
+    data = request.json
+    stub = get_grpc_stub()
+    
     try:
-        data = request.get_json()
-        
-        if not all(k in data for k in ['name', 'email', 'password', 'user_type']):
-            return jsonify({'error': 'Missing required fields'}), 400
-        
-        stub = get_grpc_stub()
-        grpc_request = users_pb2.CreateUserRequest(
-            name=data['name'],
-            email=data['email'],
-            password=data['password'],
-            user_type=data['user_type'],
-            cpf=data.get('cpf', ''),
-            phone=data.get('phone', '')
-        )
-        
-        response = stub.CreateUser(grpc_request)
-        
-        if not response.success:
-            return jsonify({'error': response.message}), 400
-        
+        response = stub.CreateUser(users_pb2.CreateUserRequest(
+            name=data.get('name'),
+            email=data.get('email'),
+            password=data.get('password'),
+            user_type=string_to_role(data.get('user_type', 'patient'))
+        ))
         return jsonify({
-            'user_id': response.user_id,
-            'name': response.name,
-            'email': response.email,
-            'user_type': response.user_type,
-            'cpf': response.cpf,
-            'phone': response.phone,
-            'created_at': response.created_at,
-            'message': response.message
+            "user_id": response.user_id,
+            "name": response.name,
+            "email": response.email,
+            "user_type": response.user_type,
+            "message": "Usuário criado com sucesso"
         }), 201
-        
     except grpc.RpcError as e:
-        return jsonify({'error': f'gRPC error: {e.details()}'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": e.details()}), 500
 
 @app.route('/users/<int:user_id>', methods=['GET'])
 def get_user(user_id):
+    stub = get_grpc_stub()
     try:
-        stub = get_grpc_stub()
-        grpc_request = users_pb2.GetUserRequest(user_id=user_id)
-        response = stub.GetUser(grpc_request)
-        
-        if not response.success:
-            return jsonify({'error': response.message}), 404
-        
+        response = stub.GetUser(users_pb2.GetUserRequest(user_id=user_id))
         return jsonify({
-            'user_id': response.user_id,
-            'name': response.name,
-            'email': response.email,
-            'user_type': response.user_type,
-            'cpf': response.cpf,
-            'phone': response.phone,
-            'created_at': response.created_at
-        }), 200
-        
+            "user_id": response.user_id,
+            "name": response.name,
+            "email": response.email,
+            "user_type": response.user_type
+        })
     except grpc.RpcError as e:
-        return jsonify({'error': f'gRPC error: {e.details()}'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/users/<int:user_id>', methods=['PUT'])
-def update_user(user_id):
-    try:
-        data = request.get_json()
-        
-        stub = get_grpc_stub()
-        grpc_request = users_pb2.UpdateUserRequest(
-            user_id=user_id,
-            name=data.get('name', ''),
-            email=data.get('email', ''),
-            user_type=data.get('user_type', ''),
-            phone=data.get('phone', '')
-        )
-        
-        response = stub.UpdateUser(grpc_request)
-        
-        if not response.success:
-            return jsonify({'error': response.message}), 400
-        
-        return jsonify({
-            'user_id': response.user_id,
-            'name': response.name,
-            'email': response.email,
-            'user_type': response.user_type,
-            'phone': response.phone,
-            'message': response.message
-        }), 200
-        
-    except grpc.RpcError as e:
-        return jsonify({'error': f'gRPC error: {e.details()}'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": "Usuário não encontrado ou erro interno"}), 404
 
 @app.route('/users/<int:user_id>', methods=['DELETE'])
 def delete_user(user_id):
+    stub = get_grpc_stub()
     try:
-        stub = get_grpc_stub()
-        grpc_request = users_pb2.DeleteUserRequest(user_id=user_id)
-        response = stub.DeleteUser(grpc_request)
-        
-        if not response.success:
-            return jsonify({'error': response.message}), 404
-        
-        return jsonify({'message': response.message}), 200
-        
-    except grpc.RpcError as e:
-        return jsonify({'error': f'gRPC error: {e.details()}'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/users', methods=['GET'])
-def list_users():
-    try:
-        user_type = request.args.get('user_type', '')
-        limit = int(request.args.get('limit', 50))
-        offset = int(request.args.get('offset', 0))
-        
-        stub = get_grpc_stub()
-        grpc_request = users_pb2.ListUsersRequest(
-            user_type=user_type,
-            limit=limit,
-            offset=offset
-        )
-        
-        response = stub.ListUsers(grpc_request)
-        
-        users = []
-        for user in response.users:
-            users.append({
-                'user_id': user.user_id,
-                'name': user.name,
-                'email': user.email,
-                'user_type': user.user_type,
-                'cpf': user.cpf,
-                'phone': user.phone,
-                'created_at': user.created_at
-            })
-        
+        response = stub.DeleteUser(users_pb2.DeleteUserRequest(user_id=user_id))
         return jsonify({
-            'users': users,
-            'total': response.total
-        }), 200
-        
+            "success": response.success,
+            "message": response.message
+        })
     except grpc.RpcError as e:
-        return jsonify({'error': f'gRPC error: {e.details()}'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": e.details()}), 500
 
 @app.route('/auth/login', methods=['POST'])
-def authenticate_user():
+def login():
+    data = request.json
+    stub = get_grpc_stub()
     try:
-        data = request.get_json()
+        response = stub.AuthenticateUser(users_pb2.AuthRequest(
+            email=data.get('email'),
+            password=data.get('password')
+        ))
         
-        if not all(k in data for k in ['email', 'password']):
-            return jsonify({'error': 'Missing email or password'}), 400
-        
-        stub = get_grpc_stub()
-        grpc_request = users_pb2.AuthRequest(
-            email=data['email'],
-            password=data['password']
-        )
-        
-        response = stub.AuthenticateUser(grpc_request)
-        
-        if not response.success:
-            return jsonify({'error': response.message}), 401
-        
-        return jsonify({
-            'user_id': response.user_id,
-            'user_type': response.user_type,
-            'token': response.token,
-            'message': response.message
-        }), 200
-        
+        if response.success:
+            return jsonify({
+                "success": True,
+                "token": response.token,
+                "user_id": response.user_id,
+                "message": response.message
+            })
+        else:
+            return jsonify({"success": False, "message": "Credenciais inválidas"}), 401
+            
     except grpc.RpcError as e:
-        return jsonify({'error': f'gRPC error: {e.details()}'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": e.details()}), 500
+
+# Rota extra para listar (opcional)
+@app.route('/users', methods=['GET'])
+def list_users():
+    stub = get_grpc_stub()
+    # Pega parâmetros da URL ?limit=10&user_type=doctor
+    u_type = request.args.get('user_type', '')
+    limit = int(request.args.get('limit', 50))
+    
+    # Mapeia string para enum se fornecido
+    enum_type = string_to_role(u_type) if u_type else 0 
+
+    try:
+        response = stub.ListUsers(users_pb2.ListUsersRequest(
+            user_type=enum_type,
+            limit=limit
+        ))
+        
+        users_list = []
+        for u in response.users:
+            users_list.append({
+                "user_id": u.user_id,
+                "name": u.name,
+                "email": u.email,
+                "user_type": u.user_type
+            })
+            
+        return jsonify({"users": users_list, "total": response.total})
+    except grpc.RpcError as e:
+        return jsonify({"error": e.details()}), 500
 
 if __name__ == '__main__':
-    port = int(os.getenv('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    print("Interface REST rodando na porta 5000...")
+    app.run(host='0.0.0.0', port=5000, debug=True)
