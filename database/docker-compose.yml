@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: clinica-db
+    restart: always
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: clinica-app
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      -  minharede
+
+volumes:
+  postgres_data:
+  
+networks:
+  minharede:
+    driver: bridge
