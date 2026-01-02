@@ -1,0 +1,34 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  notificacoes:
+    build: ./notificacoes
+    command: python notificacoes_service.py
+    ports:
+      - "5000:5000"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  cliente:
+    build: ./notificacoes
+    command: python -u cliente_notificacoes.py
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  mock_agendamento:
+    build: ./notificacoes
+    command: python eventos_mock.py
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
