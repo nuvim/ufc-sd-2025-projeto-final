@@ -1,0 +1,36 @@
+services:
+  # --- Serviço do Banco de Dados ---
+  postgres:
+    image: postgres:15-alpine
+    container_name: clinica-db
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=clinica-app
+    ports:
+      - "5432:5432" # Libera a porta 5432 para você acessar do seu PC (DBeaver/Terminal)
+    volumes:
+      - pgdata:/var/lib/postgresql/data # Persiste os dados se reiniciar o container
+
+  # --- Seu Serviço Go ---
+  users_service:
+    build: . # Constrói usando o Dockerfile da pasta atual
+    container_name: users-app
+    restart: on-failure
+    environment:
+      # O PULO DO GATO AQUI:
+      # DB_HOST deve ser o NOME do serviço acima ("postgres"), não "localhost"
+      - DB_HOST=postgres  
+      - DB_PORT=5432
+      - DB_USER=user
+      - DB_PASSWORD=password
+      - DB_NAME=clinica-app
+      - GRPC_PORT=50051
+    ports:
+      - "50051:50051" # Libera a porta do gRPC para o seu Python acessar depois
+    depends_on:
+      - postgres # Espera o banco iniciar antes de tentar subir
+
+# Volume para guardar os dados do banco
+volumes:
+  pgdata:

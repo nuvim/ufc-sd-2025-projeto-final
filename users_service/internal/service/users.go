@@ -2,20 +2,10 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"golang.org/x/crypto/bcrypt"
 	pb "users_service/pb"
 )
-
-type UserServer struct {
-	pb.UnimplementedUserServiceServer
-	DB *sql.DB
-}
-
-func NewUserService(db *sql.DB) *UserServer {
-	return &UserServer{DB: db}
-}
 
 func (s *UserServer) CreateUser(ctx context.Context, req *pb.CreateUserRequest) (*pb.UserResponse, error) {
 	// Verifica a role do requisitante através do token.
@@ -45,12 +35,10 @@ func (s *UserServer) CreateUser(ctx context.Context, req *pb.CreateUserRequest) 
         return nil, fmt.Errorf("permissão negada: %s não pode criar %s", requesterRole, targetRole)
     }
 
-	// Verifica se todos os campos foram preenchidos.
     if req.Name == "" || req.Email == "" || req.Password == "" {
         return nil, fmt.Errorf("erro: todos os campos são obrigatórios")
     }
 
-	// Verifica se já existe um usuário com o email do request.
 	var emailExists bool
     queryCheck := `SELECT EXISTS(SELECT 1 FROM usuario WHERE email = $1)`
     err = s.DB.QueryRow(queryCheck, req.Email).Scan(&emailExists)
@@ -62,13 +50,11 @@ func (s *UserServer) CreateUser(ctx context.Context, req *pb.CreateUserRequest) 
         return nil, fmt.Errorf("erro: o email '%s' já está cadastrado", req.Email)
     }
 	
-	// Usa bcrypt para criar o hash da senha.
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, fmt.Errorf("erro ao gerar hash da senha: %v", err)
 	}
 
-	// Insere usuário no banco de dados.
 	var userID int32
     tipoStr := req.UserType.String()
 	query := `INSERT INTO usuario (nome, email, senha, tipo) VALUES ($1, $2, $3, $4) RETURNING id`
@@ -77,7 +63,6 @@ func (s *UserServer) CreateUser(ctx context.Context, req *pb.CreateUserRequest) 
 		return nil, fmt.Errorf("erro ao salvar no banco: %v", err)
 	}
 
-	// Retorna informações do novo usuário.
 	return &pb.UserResponse{
 		UserId:   userID,
 		Name:     req.Name,
@@ -86,34 +71,260 @@ func (s *UserServer) CreateUser(ctx context.Context, req *pb.CreateUserRequest) 
 	}, nil
 }
 
-// Função auxiliar para identificar role do requisitante através do token.
-func (s *UserServer) getRequesterRole(token int32) (pb.UserType, error) {
-	if token == 0 {
-        return pb.UserType_UNKNOWN_ROLE, fmt.Errorf("acesso negado: login obrigatório.")
-    }
-
-    var roleStr string
-    query := `SELECT tipo FROM usuario WHERE id = $1`
-    err = s.DB.QueryRow(query, token).Scan(&roleStr)
+func (s *UserServer) GetUser(ctx context.Context, req *pb.GetUserRequest) (*pb.UserResponse, error) {
+    requesterRole, err := s.getRequesterRole(req.Token)
     if err != nil {
-        return pb.UserType_UNKNOWN_ROLE, fmt.Errorf("usuário solicitante (ID %d) não encontrado", token)
+        return nil, err
     }
 
-    return stringToRole(roleStr), nil
+    var user pb.UserResponse
+    var targetRoleStr string
+    
+    query := `SELECT id, nome, email, tipo FROM usuario WHERE id = $1`
+    err = s.DB.QueryRow(query, req.UserId).Scan(&user.UserId, &user.Name, &user.Email, &targetRoleStr)
+    
+    if err == sql.ErrNoRows {
+        return nil, fmt.Errorf("usuário não encontrado")
+    } else if err != nil {
+        return nil, fmt.Errorf("erro ao buscar usuário: %v", err)
+    }
+
+    targetRole := stringToRole(targetRoleStr)
+    user.UserType = targetRole
+
+    // Todos podem ver o próprio perfil.
+    if req.Token == req.UserId {
+        return &user, nil
+    }
+
+    // Verifica se requisitante possui autorização para visualizar o usuário. 
+    switch requesterRole {
+    case pb.UserType_PACIENTE:
+        return nil, fmt.Errorf("acesso negado: paciente só pode ver seu próprio perfil")
+
+    case pb.UserType_MEDICO:
+        if targetRole != pb.UserType_PACIENTE {
+            return nil, fmt.Errorf("acesso negado: médicos só podem visualizar pacientes")
+        }
+
+    case pb.UserType_RECEPCIONISTA:
+        if targetRole == pb.UserType_ADMINISTRADOR {
+            return nil, fmt.Errorf("acesso negado: recepcionista não pode visualizar administradores")
+        }
+
+    case pb.UserType_ADMINISTRADOR:
+        // Administrador não possui restrições de visualização.
+    
+    default:
+        return nil, fmt.Errorf("acesso negado")
+    }
+
+    return &user, nil
 }
 
-// Função auxiliar para converter string do banco para ENUM do proto.
-func stringToRole(roleStr string) pb.UserType {
-    switch roleStr {
-    case "ADMINISTRADOR":
-        return pb.UserType_ADMINISTRADOR
-    case "MEDICO":
-        return pb.UserType_MEDICO
-    case "RECEPCIONISTA":
-        return pb.UserType_RECEPCIONISTA
-    case "PACIENTE":
-        return pb.UserType_PACIENTE
-    default:
-        return pb.UserType_UNKNOWN_ROLE
+func (s *UserServer) ListUsers(ctx context.Context, req *pb.ListUsersRequest) (*pb.ListUsersResponse, error) {
+    requesterRole, err := s.getRequesterRole(req.Token)
+    if err != nil {
+        return nil, err
     }
+
+    if requesterRole == pb.UserType_PACIENTE {
+        return nil, fmt.Errorf("acesso negado: pacientes não têm permissão para listar usuários")
+    }
+
+    // Variáveis para montar a query dinâmica
+    var query string
+    var args []interface{}
+
+    // Verifica se requisitante possui autorização para listar usuários. 
+    switch requesterRole {
+    case pb.UserType_MEDICO:
+        if req.UserType != pb.UserType_UNKNOWN_ROLE && req.UserType != pb.UserType_PACIENTE {
+            return nil, fmt.Errorf("acesso negado: médicos só podem listar pacientes")
+        }
+
+        query = `SELECT id, nome, email, tipo FROM usuario WHERE tipo = 'PACIENTE' LIMIT $1 OFFSET $2`
+        args = []interface{}{req.Limit, req.Offset}
+
+    case pb.UserType_RECEPCIONISTA:
+        if req.UserType == pb.UserType_ADMINISTRADOR {
+            return nil, fmt.Errorf("acesso negado: recepcionista não pode listar administradores")
+        }
+
+        if req.UserType != pb.UserType_UNKNOWN_ROLE { // Aplicando o filtro por tipo do usuário.
+            query = `SELECT id, nome, email, tipo FROM usuario WHERE tipo = $1 LIMIT $2 OFFSET $3`
+            args = []interface{}{req.UserType.String(), req.Limit, req.Offset}
+        } else {
+            query = `SELECT id, nome, email, tipo FROM usuario WHERE tipo != 'ADMINISTRADOR' LIMIT $1 OFFSET $2`
+            args = []interface{}{req.Limit, req.Offset}
+        }
+
+    case pb.UserType_ADMINISTRADOR:
+        if req.UserType != pb.UserType_UNKNOWN_ROLE { // Aplicando o filtro por tipo do usuário.
+            query = `SELECT id, nome, email, tipo FROM usuario WHERE tipo = $1 LIMIT $2 OFFSET $3`
+            args = []interface{}{req.UserType.String(), req.Limit, req.Offset}
+        } else {
+            query = `SELECT id, nome, email, tipo FROM usuario LIMIT $1 OFFSET $2`
+            args = []interface{}{req.Limit, req.Offset}
+        }
+    }
+
+    // Executa a query
+    rows, err := s.DB.Query(query, args...)
+    if err != nil {
+        return nil, fmt.Errorf("erro ao listar usuários: %v", err)
+    }
+    defer rows.Close()
+
+    // Iteração para montar a resposta.
+    var users []*pb.UserResponse
+    for rows.Next() {
+        var u pb.UserResponse
+        var tipoStr string
+        if err := rows.Scan(&u.UserId, &u.Name, &u.Email, &tipoStr); err != nil {
+            continue
+        }
+        u.UserType = stringToRole(tipoStr)
+        users = append(users, &u)
+    }
+
+    return &pb.ListUsersResponse{
+        Users: users,
+        Total: int32(len(users)),
+    }, nil
+}
+
+func (s *UserServer) UpdateUser(ctx context.Context, req *pb.UpdateUserRequest) (*pb.UserResponse, error) {
+    requesterRole, err := s.getRequesterRole(req.Token)
+    if err != nil {
+        return nil, err
+    }
+
+    var currentName, currentEmail, currentPasswordHash, targetRoleStr string
+
+    // Busca os dados atuais do usuário
+    queryTarget := `SELECT nome, email, senha, tipo FROM usuario WHERE id = $1`
+    err = s.DB.QueryRow(queryTarget, req.UserId).Scan(&currentName, &currentEmail, &currentPasswordHash, &targetRoleStr)
+    
+    if err == sql.ErrNoRows {
+        return nil, fmt.Errorf("usuário não encontrado")
+    } else if err != nil {
+        return nil, fmt.Errorf("erro ao buscar usuário: %v", err)
+    }
+
+    // Verifica se requisitante possui autorização para editar o usuário. 
+    allowed := false
+    targetRole := stringToRole(targetRoleStr)
+
+    if req.Token == req.UserId { // Todos podem ver o próprio perfil.
+        allowed = true
+    } else {
+        switch requesterRole {
+        case pb.UserType_ADMINISTRADOR:
+            if targetRole != pb.UserType_PACIENTE { // Administrador não pode atualizar paciente.
+                allowed = true
+            }
+        case pb.UserType_RECEPCIONISTA:
+            if targetRole == pb.UserType_PACIENTE { // Recepcionista só pode atualizar paciente.
+                allowed = true
+            }
+        }
+    }
+
+    if !allowed {
+        return nil, fmt.Errorf("permissão negada: %s não pode alterar %s", requesterRole, targetRole)
+    }
+    
+    // Se os dados para atualizar estiverem vazios, mantém os dados atuais.
+    finalName := req.Name
+    if finalName == "" {
+        finalName = currentName
+    }
+
+    finalEmail := req.Email
+    if finalEmail == "" {
+        finalEmail = currentEmail
+    } else if finalEmail != currentEmail { // Se for um novo email é necessário checar se já não existe.
+        var emailExists bool
+        checkQuery := `SELECT EXISTS(SELECT 1 FROM usuario WHERE email = $1 AND id != $2)`
+
+        if err := s.DB.QueryRow(checkQuery, finalEmail, req.UserId).Scan(&emailExists); 
+        err != nil {
+            return nil, fmt.Errorf("erro ao validar email: %v", err)
+        }
+
+        if emailExists {
+            return nil, fmt.Errorf("o email '%s' já está em uso", finalEmail)
+        }
+    }
+
+    finalPasswordHash := currentPasswordHash
+    if req.Password != "" { // Se for uma nova senha é necessário gerar um novo hash.
+        hashedBytes, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+        if err != nil {
+            return nil, fmt.Errorf("erro ao gerar hash da senha: %v", err)
+        }
+        finalPasswordHash = string(hashedBytes)
+    }
+
+    updateQuery := `UPDATE usuario SET nome=$1, email=$2, senha=$3 WHERE id=$4`    
+    _, err = s.DB.ExecContext(ctx, updateQuery, finalName, finalEmail, finalPasswordHash, req.UserId)
+    if err != nil {
+        return nil, fmt.Errorf("erro ao persistir atualização: %v", err)
+    }
+
+    return &pb.UserResponse{
+        UserId:   req.UserId,
+        Name:     finalName,
+        Email:    finalEmail,
+        UserType: targetRole,
+    }, nil
+}
+
+func (s *UserServer) DeleteUser(ctx context.Context, req *pb.DeleteUserRequest) (*pb.Empty, error) {
+    requesterRole, err := s.getRequesterRole(req.Token)
+    if err != nil {
+        return nil, err
+    }
+
+    var targetRoleStr string
+    queryTarget := `SELECT tipo FROM usuario WHERE id = $1`
+    err = s.DB.QueryRow(queryTarget, req.UserId).Scan(&targetRoleStr)
+
+    if err == sql.ErrNoRows {
+        return nil, fmt.Errorf("usuário não encontrado")
+    } else if err != nil {
+        return nil, fmt.Errorf("erro ao buscar usuário: %v", err)
+    }
+
+    // Verifica se requisitante possui autorização para deletar o usuário. 
+    allowed := false
+    targetRole := stringToRole(targetRoleStr)
+    if req.Token == req.UserId && targetRole == pb.UserType_PACIENTE {
+        allowed = true
+    } else {
+        switch requesterRole {
+        case pb.UserType_RECEPCIONISTA:
+            if targetRole == pb.UserType_PACIENTE {
+                allowed = true
+            }
+
+        case pb.UserType_ADMINISTRADOR:
+            if targetRole == pb.UserType_MEDICO || targetRole == pb.UserType_RECEPCIONISTA {
+                allowed = true
+            }
+        }
+    }
+
+    if !allowed {
+        return nil, fmt.Errorf("permissão negada: %s não pode deletar %s", requesterRole, targetRole)
+    }
+
+    deleteQuery := `DELETE FROM usuario WHERE id = $1`
+    _, err = s.DB.ExecContext(ctx, deleteQuery, req.UserId)
+    if err != nil {
+        return nil, fmt.Errorf("erro ao deletar usuário: %v", err)
+    }
+
+    return &pb.Empty{}, nil
 }

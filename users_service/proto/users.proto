@@ -35,11 +35,10 @@ message AuthRequest {
 }
 
 message AuthResponse {
-  bool success = 1;
-  int32 token = 2;
-  int32 user_id = 3;
+  int32 token = 1;
+  int32 user_id = 2;
+  string name = 3;
   UserType user_type = 4;
-  string message = 5;
 }
 
 message GetUserRequest {
@@ -49,7 +48,7 @@ message GetUserRequest {
 
 message ListUsersRequest {
   int32 token = 1;
-  UserType user_type = 2; // Filtro por tipo de usuário.
+  UserType user_type = 2; // Filtro opcional por tipo de usuário.
   int32 limit = 3;
   int32 offset = 4;
 }
@@ -61,7 +60,7 @@ message ListUsersResponse {
 
 message UpdateUserRequest {
   int32 token = 1;
-  int32 user_id = 2; // ID de quem será alterado.
+  int32 user_id = 2;
   string name = 3;
   string email = 4;
   string password = 5;
@@ -77,9 +76,4 @@ message UserResponse {
 message DeleteUserRequest {
   int32 token = 1;
   int32 user_id = 2;
-}
-
-message DeleteUserResponse {
-  bool success = 1;
-  string message = 2;
 }
