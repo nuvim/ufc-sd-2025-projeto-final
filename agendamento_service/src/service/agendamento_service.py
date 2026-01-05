@@ -4,6 +4,9 @@ from datetime import datetime, time
 from src.integration.users_client import UsersClient
 from src.integration.validation_client import ValidationClient
 
+from src.rabbitmq.notification import Notification
+from src.rabbitmq.publisher import NotificationPublisher
+
 from src.repository.agendamento_repository import AgendamentoRepository, AgendamentoError
 from src.utils.validators import validar_enum
 
@@ -64,7 +67,7 @@ class AgendamentoService:
 
             validar_enum(status_validacao, self.STATUS, "Status")
 
-            self.agendamento_repository.update_status(agendamento_id, status_validacao)
+            self.atualizar_status_e_notificar(paciente_id, agendamento_id, status_validacao, data, horario)
             
             return {
                 "id": agendamento_id,
@@ -144,7 +147,7 @@ class AgendamentoService:
             else:
                 raise xmlrpc.client.Fault(1, "Permissão negada para cancelar agendamentos.")
 
-            self.agendamento_repository.update_status(agendamento_id, "CANCELADO")
+            self.atualizar_status_e_notificar(agendamento['paciente_id'],agendamento['id'], "CANCELADO", agendamento['data'], agendamento['horario'])
 
             return {
                 "id": agendamento_id,
@@ -191,7 +194,7 @@ class AgendamentoService:
             if datetime.now() < data_hora_agendada:
                 raise xmlrpc.client.Fault(1, "Não é possível concluir um agendamento antes do horário marcado.")
 
-            self.agendamento_repository.update_status(agendamento_id, "CONCLUIDO")
+            self.atualizar_status_e_notificar(agendamento['paciente_id'],agendamento['id'], "CONCLUIDO", agendamento['data'], agendamento['horario'])
 
             return {
                 "id": agendamento_id,
@@ -209,9 +212,25 @@ class AgendamentoService:
             else:
                 raise xmlrpc.client.Fault(1, msg)
             
-    # Função helper.
+    # Funções helper.
     def _data_hora_agendamento(self, data, horario):
         return datetime.combine(
             datetime.fromisoformat(data).date(),
             time(hour=horario)
         )
+    
+    def atualizar_status_e_notificar(self, paciente_id, agendamento_id, novo_status, data, horario):
+        self.agendamento_repository.update_status(agendamento_id, novo_status)
+
+        publisher = NotificationPublisher()
+        try:
+            notif_paciente = Notification(
+                user_id=paciente_id,
+                agendamento_id=agendamento_id,
+                novo_status=novo_status,
+                mensagem=f"Sua consulta para o dia {data} às {horario}h teve o status atualizado para {novo_status}"
+            )
+            publisher.publish(notif_paciente)
+
+        finally:
+            publisher.close()
