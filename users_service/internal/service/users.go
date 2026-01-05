@@ -144,7 +144,7 @@ func (s *UserServer) ListUsers(ctx context.Context, req *pb.ListUsersRequest) (*
     // Verifica se requisitante possui autorização para listar usuários. 
     switch requesterRole {
     case pb.UserType_PACIENTE:
-        if req.UserType != pb.UserType_MEDICO {
+        if req.UserType != pb.UserType_UNKNOWN_ROLE && req.UserType != pb.UserType_MEDICO {
             return nil, status.Error(codes.PermissionDenied, "acesso negado")
         }
         

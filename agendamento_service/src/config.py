@@ -11,6 +11,7 @@ class Config:
 
     VALIDATION_HOST = os.getenv("VALIDATION_HOST")
     VALIDATION_PORT = int(os.getenv("VALIDATION_PORT"))
+    BUFFER_SIZE = 4096
 
     RABBITMQ_HOST = os.getenv("RABBITMQ_HOST")
     RABBITMQ_PORT = int(os.getenv("RABBITMQ_PORT"))
