@@ -10,15 +10,18 @@ class ValidationClient:
             "dados_pagamento": dados_pagamento
         }
 
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
-            client.connect((Config.VALIDATION_HOST, Config.VALIDATION_PORT))
-            client.sendall(json.dumps(payload).encode())
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
+                client.connect((Config.VALIDATION_HOST, Config.VALIDATION_PORT))
 
-            response = client.recv(Config.BUFFER_SIZE)
+                client.sendall(json.dumps(payload).encode())
+                response = client.recv(Config.BUFFER_SIZE)
 
-        data = json.loads(response.decode())
+            data = json.loads(response.decode())
+            if "erro" in data:
+                raise Exception(data["erro"])
 
-        if "erro" in data:
-            raise Exception(data["erro"])
+            return data["status"]
 
-        return data["status"]
+        except Exception as e:
+            raise

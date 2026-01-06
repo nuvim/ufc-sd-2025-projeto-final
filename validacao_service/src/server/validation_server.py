@@ -9,7 +9,7 @@ class ValidationServer:
 
     def __init__(self):
         self.validator = PaymentValidator()
-
+        
     def start(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
             server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -43,7 +43,7 @@ class ValidationServer:
 
             response = {"status": status}
 
-        except Exception:
+        except Exception as e:
             response = {"erro": "erro interno no servidor"}
 
         conn.sendall(json.dumps(response).encode())
