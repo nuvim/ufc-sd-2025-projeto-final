@@ -20,3 +20,5 @@ users_service/service/users_backend
 .idea/
 .DS_Store
 Thumbs.db
+
+client_data/

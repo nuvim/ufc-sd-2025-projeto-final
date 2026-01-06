@@ -31,10 +31,7 @@ services:
       - GRPC_PORT=50051
       
   users_client:
-    build:
-      context: ./clients
-      dockerfile: users_client/Dockerfile
-    image: filipefernandes/users-client:v1
+    image: joaomnz/users-client:v1
     container_name: clinica_users_client
     stdin_open: true
     tty: true
@@ -97,10 +94,7 @@ services:
       - GRPC_ADDRESS=users_service:50051
       
   agendamento_client:
-    build:
-      context: ./clients
-      dockerfile: agendamento_client/Dockerfile
-    image: filipefernandes/agendamento-client:v1
+    image: joaomnz/agendamento-client:v1
     container_name: clinica_agendamento_client
     stdin_open: true
     tty: true
