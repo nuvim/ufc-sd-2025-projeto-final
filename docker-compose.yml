@@ -109,6 +109,11 @@ services:
       - agendamento_service
     environment:
       - RPC_ADDRESS=http://agendamento_service:8000
+ 
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=guest
+      - RABBITMQ_PASSWORD=guest
     volumes:
       - ./client_data:/root/.med_session
       

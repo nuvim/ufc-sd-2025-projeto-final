@@ -6,6 +6,7 @@ import sys
 sys.path.append(os.getcwd())
 
 from utils.session_manager import load_session
+from src.rabbitmq.consumer import NotificationConsumer
 
 RPC_ADDRESS = os.getenv("RPC_ADDRESS")
 
@@ -78,6 +79,24 @@ def concluir(server, args):
     except Exception as e:
         print(f"Erro: {e}")
 
+def ouvir_notificacoes():
+    session = load_session()
+
+    consumer = NotificationConsumer(int(session))
+    mensagens = consumer.consume_all()
+
+    if not mensagens:
+        print("Nenhuma notificação pendente.")
+        return
+
+    print("\nNotificações:\n")
+    for n in mensagens:
+        print(
+            f"[{n.timestamp}] "
+            f"Agendamento {n.agendamento_id} → {n.novo_status}\n"
+            f"{n.mensagem}\n"
+        )
+
 def main():
     parser = argparse.ArgumentParser(description="Cliente XML-RPC - Agendamento Service")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -113,6 +132,8 @@ def main():
     concluir_parser = subparsers.add_parser("concluir")
     concluir_parser.add_argument("--id", type=int, required=True, dest="agendamento_id")
 
+    subparsers.add_parser("ouvir-notificacoes")
+
     args = parser.parse_args()
 
     server = xmlrpc.client.ServerProxy(RPC_ADDRESS, allow_none=True)
@@ -126,6 +147,8 @@ def main():
             cancelar(server, args)
         case "concluir":
             concluir(server, args)
+        case "ouvir-notificacoes":
+            ouvir_notificacoes()
 
 if __name__ == "__main__":
     main()
